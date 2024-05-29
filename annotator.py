@@ -10,11 +10,13 @@ import json
 import math
 import argparse
 import numpy as np
+from PIL import Image
 import tempfile
 import torch
 import base64
 
-from PyQt5.QtWidgets import QWidget, QApplication, QMainWindow, QApplication, QPushButton, QLabel, QFileDialog, QProgressBar, QComboBox, QScrollArea, QDockWidget, QMessageBox
+from PyQt5.QtWidgets import QWidget, QApplication, QMainWindow, QApplication, QPushButton, QLabel, QFileDialog
+from PyQt5.QtWidgets import QProgressBar, QComboBox, QScrollArea, QDockWidget, QMessageBox, QLineEdit, QSlider
 from PyQt5.QtGui import QPixmap, QIcon, QImage
 from PyQt5.Qt import QSize
 from qtpy.QtCore import Qt
@@ -153,6 +155,12 @@ class MainWindow(QMainWindow):
         self.img_progress_bar.setMinimum(0)
         self.img_progress_bar.setMaximum(1)
         self.img_progress_bar.setValue(0)
+
+        self.slider = QSlider(Qt.Horizontal, self)  # 设置为水平方向
+        self.slider.setMinimum(0)
+        self.slider.setMaximum(1)
+        self.slider.valueChanged[int].connect(self.changeValue)
+
         self.button_proposal1 = QPushButton('Proposal1', self)
         self.button_proposal1.clicked.connect(self.choose_proposal1)
         self.button_proposal1.setShortcut('1')
@@ -182,7 +190,10 @@ class MainWindow(QMainWindow):
         self.button_last.resize(int(0.1 * global_w),int(0.04 * global_h))
         self.class_on_text.move(int(0.01 * global_w), int(0.9 * global_h))
         self.img_progress_bar.move(int(0.01 * global_w), int(0.8 * global_h))
-        self.img_progress_bar.resize(int(0.3 * global_w),int(0.04 * global_h))
+        self.img_progress_bar.resize(int(0.28 * global_w),int(0.04 * global_h))
+
+        self.slider.move(int(0.01 * global_w), int(0.95 * global_h))
+        self.slider.resize(int(0.3 * global_w),int(0.02 * global_h))
         
         self.button_proposal1.resize(int(0.17 * global_w),int(0.14 * global_h))
         self.button_proposal1.move(int(0.33 * global_w), int(0.8 * global_h))
@@ -192,8 +203,8 @@ class MainWindow(QMainWindow):
         self.button_proposal3.move(int(0.67 * global_w), int(0.8 * global_h))
         self.button_proposal4.resize(int(0.17 * global_w),int(0.14 * global_h))
         self.button_proposal4.move(int(0.84 * global_w), int(0.8 * global_h))
-        
-        
+
+        # self.lineEdit = QLineEdit()
         
         self.zoomWidget = ZoomWidget()
 
@@ -602,7 +613,10 @@ class MainWindow(QMainWindow):
         if self.current_img_index < self.img_len - 1:
             self.current_img_index += 1
             self.current_img = self.img_list[self.current_img_index]
-            self.loadImg()
+            try:
+                self.loadImg()
+            except Exception as ex1:
+                print("loadImg {0} except {1}".format(self.current_img, ex1))
 
     def clickButtonLast(self):
         if self.actions.save.isEnabled():
@@ -636,9 +650,17 @@ class MainWindow(QMainWindow):
             self.sam_mask = self.sam_mask_proposal[3]
             self.canvas.setHiding()
             self.canvas.update()
-            
+
+    def changeValue(self, value):
+        self.img_progress_bar.setValue(value)
+        self.current_img_index = value
+        self.current_img = self.img_list[self.current_img_index]
+        self.loadImg()  # 加载并显示新图片
+
     def loadImg(self):
-        self.raw_h, self.raw_w = cv2.imread(self.current_img).shape[:2]
+        #### opencv 读取非英文路径可能出错，使用PIL 读取图像
+        self.raw_w, self.raw_h = Image.open(self.current_img).size
+        # self.raw_h, self.raw_w = cv2.imread(self.current_img).shape[:2]
         pixmap = QPixmap(self.current_img)
         #pixmap = pixmap.scaled(int(0.75 * global_w), int(0.7 * global_h))
         self.canvas.loadPixmap(pixmap)
@@ -651,6 +673,10 @@ class MainWindow(QMainWindow):
             self.loadAnno(self.current_output_filename)
         self.image_encoded_flag = False
         self.current_img_data = LabelFile.load_image_file(self.current_img)
+
+        #### 设置图片名（question）
+        # self.lineEdit.setText(os.path.basename(self.current_img))
+        self.setWindowTitle(os.path.basename(self.current_img))
 
 
     def clickFileChoose(self):
@@ -668,6 +694,7 @@ class MainWindow(QMainWindow):
         self.img_progress_bar.setMinimum(0)
         self.img_progress_bar.setMaximum(self.img_len-1)
         self.loadImg()
+        self.slider.setMaximum(self.img_len - 1)
 
     def clickSaveChoose(self):
         directory = QFileDialog.getExistingDirectory(self, 'choose target fold','.')
@@ -729,7 +756,9 @@ class MainWindow(QMainWindow):
         
     def show_proposals(self, masks=None, flag=1):
         if flag != 1:
-            img = cv2.imread(self.current_img)
+            im = Image.open(self.current_img)
+            img = np.array(im)[:,:, ::-1]
+            # img = cv2.imread(self.current_img)
             if len(img.shape) == 2:
                 img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -778,7 +807,9 @@ class MainWindow(QMainWindow):
         Box = self.canvas.currentBox
         if self.predictor is None or self.current_img == '' or Box == None:
             return
-        img = cv2.imread(self.current_img)[:,:,::-1]
+        im = Image.open(self.current_img)
+        img = np.array(im)
+        # img = cv2.imread(self.current_img)[:,:,::-1]
         rh, rw = img.shape[:2]
         input_box = np.array([Box[0].x(), Box[0].y(), Box[1].x(), Box[1].y()])
         img, input_box, _ = self.transform_input(img, box=input_box)
@@ -829,7 +860,9 @@ class MainWindow(QMainWindow):
         ClickNeg = self.canvas.currentNeg
         if self.predictor is None or self.current_img == '' or (ClickPos == None and ClickNeg == None):
             return
-        img = cv2.imread(self.current_img)[:,:,::-1]
+        im = Image.open(self.current_img)
+        img = np.array(im)
+        # img = cv2.imread(self.current_img)[:,:,::-1]
         rh, rw = img.shape[:2]
 
         input_clicks = []
